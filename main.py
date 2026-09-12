@@ -1,21 +1,42 @@
-import requests
+import os
+import json
 import time
+import urllib.request
+import urllib.parse
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = os.getenv("BOT_TOKEN")
 API = f"https://api.telegram.org/bot{TOKEN}"
 
 offset = 0
 
 print("🤖 Bot started...")
 
+def telegram(method, data=None):
+    if data is None:
+        data = {}
+
+    data = urllib.parse.urlencode(data).encode()
+
+    request = urllib.request.Request(
+        f"{API}/{method}",
+        data=data
+    )
+
+    with urllib.request.urlopen(request) as response:
+        return json.loads(response.read().decode())
+
+
 while True:
     try:
-        response = requests.get(
-            f"{API}/getUpdates",
-            params={"offset": offset, "timeout": 30}
-        ).json()
+        result = telegram(
+            "getUpdates",
+            {
+                "offset": offset,
+                "timeout": 30
+            }
+        )
 
-        for update in response.get("result", []):
+        for update in result.get("result", []):
             offset = update["update_id"] + 1
 
             message = update.get("message")
@@ -25,21 +46,21 @@ while True:
             text = message.get("text", "")
             chat_id = message["chat"]["id"]
 
-            if text == "/start":
-                requests.post(
-                    f"{API}/sendMessage",
-                    data={
+            if text.lower() == "/start":
+                telegram(
+                    "sendMessage",
+                    {
                         "chat_id": chat_id,
                         "text": "🤖 Bot Online!"
                     }
                 )
 
-            elif text == "/unbanall":
-                requests.post(
-                    f"{API}/sendMessage",
-                    data={
+            elif text.lower() == "/unban":
+                telegram(
+                    "sendMessage",
+                    {
                         "chat_id": chat_id,
-                        "text": "⚙️ Unban All command received."
+                        "text": "⚙️ /unban command received."
                     }
                 )
 
