@@ -14,7 +14,7 @@ from aiogram.exceptions import TelegramBadRequest
 from config import BOT_TOKEN, OWNER_ID, DEFAULT_AD_INTERVAL_HOURS
 from storage import (
     init_db, get_setting, set_setting,
-    add_ban, bans_last_24h
+    add_ban, bans_last_24h, add_quiz_result, get_leaderboard, get_user_stats
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -81,6 +81,8 @@ async def start(message: Message):
         "/adstop\n"
         "/quiztime 30 / 60\n"
         "/quiz QUESTION | A | B | C | D | A\n"
+        "/leaderboard\n"
+        "/mystats\n"
         "/setgroupname NAME",
         parse_mode="HTML",
     )
@@ -347,21 +349,15 @@ async def quiz_answer(callback: CallbackQuery):
     data = QUIZZES.get(key)
 
     if not data:
-        await callback.answer(
-            "⏰ Quiz khatam ho gaya.",
-            show_alert=True
-        )
+        await callback.answer("⏰ Quiz khatam ho gaya.", show_alert=True)
         return
 
     if time.time() >= data["ends"]:
-        QUIZZES.pop(key, None)
         await callback.answer("⏰ Time over.", show_alert=True)
         return
 
-    choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
 
-    # One answer per user.
     if user_id in data["answers"]:
         await callback.answer(
             "⚠️ Aap already answer de chuke ho.",
@@ -369,12 +365,72 @@ async def quiz_answer(callback: CallbackQuery):
         )
         return
 
+    choice = callback.data.split(":", 1)[1]
+    correct = choice == data["correct"]
     data["answers"][user_id] = choice
 
-    if choice == data["correct"]:
-        await callback.answer("✅ Sahi answer!", show_alert=True)
+    await add_quiz_result(
+        callback.message.chat.id,
+        user_id,
+        callback.from_user.full_name,
+        callback.from_user.username,
+        correct
+    )
+
+    if correct:
+        await callback.answer("✅ Sahi! +1 point", show_alert=True)
     else:
-        await callback.answer("❌ Galat answer.", show_alert=True)
+        await callback.answer("❌ Galat. +0 point", show_alert=True)
+
+
+@router.message(Command("leaderboard"))
+async def leaderboard(message: Message):
+    rows = await get_leaderboard(message.chat.id, 10)
+
+    if not rows:
+        await message.answer("🏆 Abhi leaderboard empty hai.")
+        return
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 <b>Quiz Leaderboard — Top 10</b>\n"]
+
+    for index, row in enumerate(rows, start=1):
+        user_id, name, username, points, correct, answered = row
+        display = f"@{html.escape(username)}" if username else html.escape(name)
+        medal = medals[index - 1] if index <= 3 else f"{index}."
+        lines.append(
+            f"{medal} {display} — <b>{points} pts</b> "
+            f"({correct} correct / {answered} answered)"
+        )
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("mystats"))
+async def mystats(message: Message):
+    if not message.from_user:
+        return
+
+    row = await get_user_stats(
+        message.chat.id,
+        message.from_user.id
+    )
+
+    if not row:
+        await message.answer(
+            "📊 Aapne abhi koi quiz answer nahi kiya."
+        )
+        return
+
+    name, username, points, correct, answered = row
+
+    await message.answer(
+        "📊 <b>Your Quiz Stats</b>\n\n"
+        f"🏆 Points: <b>{points}</b>\n"
+        f"✅ Correct: <b>{correct}</b>\n"
+        f"📝 Answered: <b>{answered}</b>",
+        parse_mode="HTML"
+    )
 
 
 @router.chat_member()
